@@ -10,6 +10,9 @@ import { esc, fmtClock, announce, downloadFile } from './util.js';
 import { PULSE_COLOR, QUALITY } from './constants.js';
 import * as store from './storage.js';
 
+// מסך "פרטים טכניים" וכפתור קובץ האבחון בכישלון. כבוי למשתמשים; להחזרה: לשנות ל-true.
+export const SHOW_PPG_DIAGNOSTICS = false;
+
 export const SETTLE_MS = 4000;
 export const MEASURE_MS = 30000;
 
@@ -319,14 +322,13 @@ export function runCameraPulse(root) {
         root.innerHTML = `
           <section class="panel" aria-labelledby="cam-res-h">
             <h3 id="cam-res-h">המדידה לא הצליחה</h3>
-            <p class="notice warn" role="alert">${esc(FAIL_TEXT[a.reason] || 'האות לא היה מספיק אמין.')} לא נשמר ערך.</p>
+            <p class="notice warn" role="alert">נסו שוב, או נסו עם פנס / בלי פנס (באור חזק). לא נשמר ערך.</p>
             <ul class="tips">
-              <li>כסו את העדשה כולה בעדינות, בלי ללחוץ חזק.</li>
-              <li>נסו אור חזק או פנס, ושבו ללא תנועה.</li>
-              <li>אפשר לעבור לספירה ידנית.</li>
+              <li>כסו את העדשה בעדינות, בלי ללחוץ חזק, והישארו ללא תנועה.</li>
+              ${a.reason === 'not_covered' ? '<li>ייתכן שהאפליקציה משתמשת בעדשה אחרת ממה שכיסיתם: הזיזו את האצבע לעדשה אחרת, או לחצו "נסו מצלמה אחרת".</li>' : ''}
+              <li>אפשר גם לעבור לספירה ידנית.</li>
             </ul>
-            ${satFrac > 0.5 ? '<p class="hint">התמונה הייתה בהירה מאוד — ייתכן שהעדשה לא כוסתה היטב.</p>' : ''}
-            ${diagHtml(a, coverage, satFrac, raw)}
+            ${SHOW_PPG_DIAGNOSTICS ? diagHtml(a, coverage, satFrac, raw) : ''}
             <div class="btn-row">
               <button class="btn primary" id="cam-again">מדידה חוזרת</button>
               <button class="btn secondary" id="cam-next">נסו מצלמה אחרת</button>
@@ -338,7 +340,8 @@ export function runCameraPulse(root) {
           if (currentCamId) skipCameraIds.push(currentCamId);
           showPrepare('בהפעלה הבאה תיבחר מצלמה אחורית אחרת.');
         });
-        root.querySelector('#cam-diag').addEventListener('click', () => {
+        const diagBtn = root.querySelector('#cam-diag');
+        if (diagBtn) diagBtn.addEventListener('click', () => {
           downloadFile(`ppg-diagnostic-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`, JSON.stringify({
             kind: 'ppg-diagnostic', analysis: { ...a, beatTimesMs: undefined },
             coverage, satFrac,

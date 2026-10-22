@@ -275,8 +275,8 @@ export function analyzePPG(tMs, red, opts = {}) {
   const per = FS / f0;
   const slow = movingAverage(lp, per);
   const bp = movingAverage(lp.map((a, i) => a - slow[i]), Math.max(3, per / 6));
-  const minDist = Math.max(2, Math.round(0.6 * per));
-  const peaksIdx = pickPeaksLocal(bp, minDist, 0.3);
+  const minDist = Math.max(2, Math.round(0.5 * per));
+  const peaksIdx = pickPeaksLocal(bp, minDist, 0.2);
   const beatTimes = peaksIdx.map((i) => (parabolic(bp, i) * 1000) / FS);
   res.nBeats = beatTimes.length;
   res.beatTimesMs = beatTimes.map((x) => Math.round(x));
@@ -293,9 +293,9 @@ export function analyzePPG(tMs, red, opts = {}) {
 
   // איכות לפי עקביות ויחס אות לרעש של הספקטרום
   const spectralGood = sp.consistency >= 0.8 && sp.snr >= 0.35;
-  const steadyMedium = sp.consistency >= 0.6 && sp.snr >= 0.3 && res.validFraction >= 0.6;
+  const steadyMedium = sp.consistency >= 0.5 && sp.snr >= 0.3 && res.validFraction >= 0.6;
   // קצב משתנה/לא סדיר: הספקטרום חד וברור (יחס אות לרעש גבוה) אך הקצב נע בין חלונות — מוצג ממוצע בלבד
-  const varying = !steadyMedium && sp.looseConsistency >= 0.75 && sp.snr >= 0.5 && res.validFraction >= 0.65;
+  const varying = !steadyMedium && sp.looseConsistency >= 0.6 && sp.snr >= 0.5 && res.validFraction >= 0.6;
   if (!steadyMedium && !varying) { res.reason = 'low_quality'; return res; }
   res.irregular = varying;
   if (sp.bpm < minBpm || sp.bpm > maxBpm) { res.reason = 'out_of_range'; return res; }
