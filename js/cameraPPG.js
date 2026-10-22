@@ -299,7 +299,7 @@ export function runCameraPulse(root) {
         ['מצלמה', currentCamLabel || '—'],
         ['פנס', torchState ? 'נדלק' : 'לא נדלק'],
         ['ערוץ שנבחר', a.channel || '—'],
-        ['ספקטרום: קצב / יחס אות לרעש / עקביות', `${a.specBpm ?? '—'} / ${(a.specSnr || 0).toFixed(2)} / ${Math.round((a.specConsistency || 0) * 100)}%`],
+        ['ספקטרום: קצב / יחס אות לרעש / עקביות', `${a.specBpm ?? '—'} / ${(a.specSnr || 0).toFixed(2)} / ${Math.round((a.specConsistency || 0) * 100)}% (רחבה ${Math.round((a.specLooseConsistency || 0) * 100)}%)`],
         ['מקטעי הפרעה (תנועה)', `${Math.round((a.artifactFraction || 0) * 100)}%`],
         ['פריימים בהירים מדי', `${Math.round(satFrac * 100)}%`],
       ];
@@ -353,6 +353,7 @@ export function runCameraPulse(root) {
           <h3 id="cam-res-h">תוצאת מדידת דופק</h3>
           <p class="kpi"><span class="kpi-num pulse">${a.bpm}</span><span class="kpi-unit">פעימות לדקה</span></p>
           <p>איכות האות: <strong>${esc(QUALITY[a.quality])}</strong> · מקור: מצלמה (PPG) · ללא טענה לדיוק קליני.</p>
+          ${a.irregular ? '<p class="notice">הקצב השתנה במהלך המדידה, לכן מוצג ערך ממוצע משוער בלבד, ללא ציר פעימות. אפשר להשוות לספירה ידנית.</p>' : ''}
           ${good ? `
             ${beatTimeline({ events: a.beatTimesMs, durationMs: a.durationSec * 1000, color: PULSE_COLOR, label: 'פעימות שזוהו במדידה', desc: `${a.beatTimesMs.length} פעימות שזוהו` })}
             <p class="hint">מרווחים בין פעימות עוקבות: ${a.ibiMinMs}–${a.ibiMaxMs} אלפיות השנייה. מדידת PPG בטלפון אינה אק״ג ואינה מתאימה לאבחון סדירות הקצב.</p>`

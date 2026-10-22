@@ -80,6 +80,27 @@ for (const bpm of [48, 60, 72, 95, 130, 160]) {
   check('PPG חלש עם מדרגות ב-14fps (53 BPM)', r.ok && Math.abs(r.bpm - 53) <= 3, `-> ${r.bpm} (${r.quality}, snr=${(r.specSnr || 0).toFixed(2)}, ${r.reason})`);
 }
 
+{
+  // עמידות לרעש: רעש לבן, סחיפה אקראית ומדרגות חשיפה אקראיות — אסור לקבל אף אחד כדופק
+  let accepted = 0, total = 0;
+  for (const kind of ['white', 'walk', 'steps']) {
+    for (let seed = 1; seed <= 30; seed++) {
+      const r = rng(seed * 7 + kind.length);
+      const tt = [], vv = [];
+      let w = 0, off = 0;
+      for (let i = 0; i < 34 * 30; i++) {
+        tt.push((i * 1000) / 30 + (r() - 0.5) * 5);
+        w += 0.3 * gauss(r);
+        if (r() < 0.01) off += (r() - 0.5) * 12;
+        vv.push(220 + (kind === 'white' ? 0.5 * gauss(r) : kind === 'walk' ? w + 0.3 * gauss(r) : off + 0.3 * gauss(r)));
+      }
+      total++;
+      if (analyzePPG(tt, vv, { settleMs: 4000 }).ok) accepted++;
+    }
+  }
+  check('רעש בלבד (לבן/סחיפה/מדרגות): 0 קבלות שגויות', accepted === 0, `-> ${accepted}/${total}`);
+}
+
 // ---------- נשימה ----------
 function synthBreath({ rpm = 15, seconds = 60, fs = 20, noise = 0.1, depth = 0.9, speech = 0, seed = 1, none = false }) {
   const r = rng(seed);

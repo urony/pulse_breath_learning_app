@@ -134,7 +134,7 @@ function windowSpectrum(seg, fs, minBpm, maxBpm) {
   const m = mean(seg);
   const w = seg.map((x, i) => (x - m) * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (W - 1))));
   const P = [];
-  for (let f = minBpm / 60; f <= maxBpm / 60 + 1e-9; f += 0.02) {
+  for (let f = (minBpm * 0.6) / 60; f <= maxBpm / 60 + 1e-9; f += 0.02) {
     let re = 0, im = 0;
     for (let i = 0; i < W; i++) {
       const a = (2 * Math.PI * f * i) / fs;
@@ -156,21 +156,33 @@ function spectralRate(lp, fs, minBpm, maxBpm, dirty) {
   for (let s = 0; s + W <= lp.length; s += H) {
     if (dirty && dirty.slice(s, s + W).some(Boolean)) { skipped++; continue; }
     const P = windowSpectrum(lp.slice(s, s + W), fs, minBpm, maxBpm);
-    const total = P.reduce((a, [, p]) => a + p, 0);
+    const inBand = P.filter(([f]) => f * 60 >= minBpm - 1e-6);
+    const total = inBand.reduce((a, [, p]) => a + p, 0);
     if (!(total > 0)) continue;
-    let best = P[0];
-    P.forEach((p) => { if (p[1] > best[1]) best = p; });
+    let best = inBand[0];
+    inBand.forEach((p) => { if (p[1] > best[1]) best = p; });
+    const at = (f) => P.reduce((a, p) => (Math.abs(p[0] - f) < Math.abs(a[0] - f) ? p : a), P[0]);
+    // שיא אמיתי חייב להיות "פסגה": שקע משני צדיו. שיא בקצה התחום (רעש איטי/סחיפה) נפסל
+    const leftDip = at(best[0] * 0.7)[1] < 0.6 * best[1];
+    const rightF = best[0] * 1.45;
+    const rightDip = rightF > maxBpm / 60 || at(rightF)[1] < 0.6 * best[1];
+    if (!(leftDip && rightDip)) { wins.push({ bpm: NaN, snr: 0 }); continue; }
     // הרמוניה שנייה חזקה מדי: אם בחצי התדר יש הספק משמעותי — זה כנראה הקצב האמיתי
-    const half = P.reduce((a, p) => (Math.abs(p[0] - best[0] / 2) < Math.abs(a[0] - best[0] / 2) ? p : a), P[0]);
+    const half = inBand.reduce((a, p) => (Math.abs(p[0] - best[0] / 2) < Math.abs(a[0] - best[0] / 2) ? p : a), P[0]);
     if (half[0] * 60 >= minBpm && Math.abs(half[0] - best[0] / 2) < 0.02 && half[1] >= 0.6 * best[1]) best = half;
-    const near = P.filter(([f]) => Math.abs(f - best[0]) <= 0.12).reduce((a, [, p]) => a + p, 0);
+    const near = inBand.filter(([f]) => Math.abs(f - best[0]) <= 0.12).reduce((a, [, p]) => a + p, 0);
     wins.push({ bpm: best[0] * 60, snr: near / total });
   }
   if (wins.length < 2) return { artifact: true, skipped, windows: wins.length };
-  const bpm = median(wins.map((x) => x.bpm));
+  const finite = wins.filter((x) => Number.isFinite(x.bpm));
+  if (finite.length < 2) return { bpm: NaN, snr: 0, consistency: 0, looseConsistency: 0, windows: wins.length, skipped };
+  const bpm = median(finite.map((x) => x.bpm));
   const tol = Math.max(3, 0.06 * bpm);
   const consistency = wins.filter((x) => Math.abs(x.bpm - bpm) <= tol).length / wins.length;
-  return { bpm, snr: median(wins.map((x) => x.snr)), consistency, windows: wins.length, skipped };
+  // סבילות רחבה: קצב לב אמיתי משתנה (נשימה, פעילות) גם בתוך מדידה של חצי דקה
+  const tolLoose = Math.max(5, 0.18 * bpm);
+  const looseConsistency = wins.filter((x) => Math.abs(x.bpm - bpm) <= tolLoose).length / wins.length;
+  return { bpm, snr: median(finite.map((x) => x.snr)), consistency, looseConsistency, windows: wins.length, skipped };
 }
 
 // מסמן מקטעים (באורך ~2 שניות) שבהם האנרגיה גבוהה בהרבה מהרגיל — תנועה או הפרעה, לא דופק
@@ -252,9 +264,11 @@ export function analyzePPG(tMs, red, opts = {}) {
   res.artifactFraction = dirty.filter(Boolean).length / dirty.length;
   const sp = spectralRate(lp, FS, minBpm, maxBpm, dirty);
   if (sp.artifact) { res.reason = res.artifactFraction > 0.1 ? 'motion' : 'too_short'; return res; }
+  if (!Number.isFinite(sp.bpm)) { res.reason = 'low_quality'; return res; }
   res.specBpm = Math.round(sp.bpm * 10) / 10;
   res.specSnr = sp.snr;
   res.specConsistency = sp.consistency;
+  res.specLooseConsistency = sp.looseConsistency;
 
   // גילוי פעימות סביב הקצב הספקטרלי
   const f0 = sp.bpm / 60;
@@ -279,17 +293,20 @@ export function analyzePPG(tMs, red, opts = {}) {
 
   // איכות לפי עקביות ויחס אות לרעש של הספקטרום
   const spectralGood = sp.consistency >= 0.8 && sp.snr >= 0.35;
-  const spectralMedium = sp.consistency >= 0.6 && sp.snr >= 0.25;
-  if (!spectralMedium) { res.reason = 'low_quality'; return res; }
+  const steadyMedium = sp.consistency >= 0.6 && sp.snr >= 0.3 && res.validFraction >= 0.6;
+  // קצב משתנה/לא סדיר: הספקטרום חד וברור (יחס אות לרעש גבוה) אך הקצב נע בין חלונות — מוצג ממוצע בלבד
+  const varying = !steadyMedium && sp.looseConsistency >= 0.75 && sp.snr >= 0.5 && res.validFraction >= 0.65;
+  if (!steadyMedium && !varying) { res.reason = 'low_quality'; return res; }
+  res.irregular = varying;
   if (sp.bpm < minBpm || sp.bpm > maxBpm) { res.reason = 'out_of_range'; return res; }
 
   let bpm = sp.bpm;
   res.rateSource = 'spectral';
-  if (valid.length >= 8) {
+  if (!varying && valid.length >= 8) {
     const ibiBpm = 60000 / mean(valid);
     if (Math.abs(ibiBpm - sp.bpm) <= 0.08 * sp.bpm) { bpm = ibiBpm; res.rateSource = 'intervals'; }
   }
-  const reliableBeats = res.validFraction >= 0.8 && valid.length >= 8 && res.rateSource === 'intervals';
+  const reliableBeats = !varying && res.validFraction >= 0.8 && valid.length >= 8 && res.rateSource === 'intervals';
   if (valid.length) { res.ibiMinMs = Math.round(Math.min(...valid)); res.ibiMaxMs = Math.round(Math.max(...valid)); }
 
   res.quality = spectralGood && reliableBeats && res.durationSec >= 20 ? 'good' : 'medium';
