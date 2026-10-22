@@ -6,7 +6,7 @@ import { analyzePPG, liveBeats } from './dsp.js';
 import { drawTrace } from './live.js';
 import { ensureAudio, tick, audioSupported } from './audio.js';
 import { beatTimeline } from './charts.js';
-import { esc, fmtClock, announce } from './util.js';
+import { esc, fmtClock, announce, downloadFile } from './util.js';
 import { PULSE_COLOR, QUALITY } from './constants.js';
 
 export const SETTLE_MS = 4000;
@@ -216,11 +216,29 @@ export function runCameraPulse(root) {
         release(stream); stream = null;
         if (finished) return;
         if (coverage < 0.8) { analysis.ok = false; analysis.reason = 'not_covered'; }
-        showResult(analysis, coverage, saturated / Math.max(1, total), wallStart + SETTLE_MS);
+        showResult(analysis, coverage, saturated / Math.max(1, total), wallStart + SETTLE_MS, { ts: ts.slice(), reds: reds.slice() });
       }
     }
 
-    function showResult(a, coverage, satFrac, sampledAtMs) {
+    function diagHtml(a, coverage, satFrac, raw) {
+      const meanRed = raw.reds.length ? raw.reds.reduce((x, y) => x + y, 0) / raw.reds.length : 0;
+      const rows = [
+        ['סיבת הכישלון', a.reason || '—'],
+        ['פעימות שזוהו', a.nBeats],
+        ['מרווחים סבירים', `${Math.round((a.validFraction || 0) * 100)}%`],
+        ['מחזוריות (ACF)', (a.acf || 0).toFixed(2)],
+        ['פריימים בשנייה', (a.fps || 0).toFixed(1)],
+        ['כיסוי העדשה', `${Math.round(coverage * 100)}%`],
+        ['ערוץ אדום ממוצע', meanRed.toFixed(0)],
+        ['פריימים בהירים מדי', `${Math.round(satFrac * 100)}%`],
+      ];
+      return `<details class="diag" open><summary>פרטים טכניים (לדיוק האלגוריתם)</summary>
+        <table class="data"><tbody>${rows.map(([k, v]) => `<tr><th scope="row">${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</tbody></table>
+        <p class="hint">הורדת קובץ אבחון שומרת אצלך במכשיר קובץ מספרים בלבד (ערך הערוץ האדום לאורך הזמן, ללא תמונה). שליחתו ליוצר היישום היא ביוזמתך.</p>
+        <button class="btn secondary small" id="cam-diag">הורדת קובץ אבחון</button></details>`;
+    }
+
+    function showResult(a, coverage, satFrac, sampledAtMs, raw) {
       announce(a.ok ? `המדידה הסתיימה: ${a.bpm} פעימות לדקה` : 'המדידה לא הצליחה');
       if (!a.ok) {
         root.innerHTML = `
@@ -233,12 +251,20 @@ export function runCameraPulse(root) {
               <li>אפשר לעבור לספירה ידנית.</li>
             </ul>
             ${satFrac > 0.5 ? '<p class="hint">התמונה הייתה בהירה מאוד — ייתכן שהעדשה לא כוסתה היטב.</p>' : ''}
+            ${diagHtml(a, coverage, satFrac, raw)}
             <div class="btn-row">
               <button class="btn primary" id="cam-again">מדידה חוזרת</button>
               <button class="btn secondary" id="cam-manual">ספירה ידנית</button>
               <button class="btn ghost" id="cam-skip">דילוג</button>
             </div>
           </section>`;
+        root.querySelector('#cam-diag').addEventListener('click', () => {
+          downloadFile(`ppg-diagnostic-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`, JSON.stringify({
+            kind: 'ppg-diagnostic', analysis: { ...a, beatTimesMs: undefined },
+            coverage, satFrac,
+            ts: raw.ts.map((x) => Math.round(x)), red: raw.reds.map((x) => Math.round(x * 100) / 100),
+          }), 'application/json');
+        });
         root.querySelector('#cam-again').addEventListener('click', () => showPrepare());
         root.querySelector('#cam-manual').addEventListener('click', () => finish({ status: 'manual' }));
         root.querySelector('#cam-skip').addEventListener('click', () => finish({ status: 'skip' }));
