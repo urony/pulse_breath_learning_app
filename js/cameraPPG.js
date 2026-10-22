@@ -8,6 +8,7 @@ import { ensureAudio, tick, audioSupported } from './audio.js';
 import { beatTimeline } from './charts.js';
 import { esc, fmtClock, announce, downloadFile } from './util.js';
 import { PULSE_COLOR, QUALITY } from './constants.js';
+import * as store from './storage.js';
 
 export const SETTLE_MS = 4000;
 export const MEASURE_MS = 30000;
@@ -24,10 +25,60 @@ const FAIL_TEXT = {
   out_of_range: 'הערך שחושב מחוץ לטווח הסביר — לא נשמר.',
 };
 
+const VIDEO_BASE = { width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 30 } };
+
+async function openCamera(deviceId) {
+  const video = deviceId ? { ...VIDEO_BASE, deviceId: { exact: deviceId } } : { ...VIDEO_BASE, facingMode: { ideal: 'environment' } };
+  const stream = await acquire({ video, audio: false });
+  const track = stream.getVideoTracks()[0];
+  let caps = {};
+  try { caps = track.getCapabilities ? track.getCapabilities() : {}; } catch { /* ignore */ }
+  const settings = track.getSettings ? track.getSettings() : {};
+  return { stream, track, torchCapable: !!caps.torch, label: track.label || '', deviceId: settings.deviceId || deviceId || '' };
+}
+
+async function rearCameras() {
+  try {
+    const list = await navigator.mediaDevices.enumerateDevices();
+    return list
+      .filter((d) => d.kind === 'videoinput' && d.deviceId && !/front|user|selfie|קדמי/i.test(d.label))
+      .map((d) => ({ id: d.deviceId, label: d.label }));
+  } catch { return []; }
+}
+
+// פותח מצלמה: השמורה/ברירת המחדל; אם אין בה שליטה בפנס — מנסה מצלמות אחוריות אחרות ובוחר את הראשונה עם פנס.
+// skipIds: מצלמות שהמשתמש ביקש לדלג עליהן ("נסו מצלמה אחרת").
+async function openBestCamera(skipIds) {
+  const saved = store.getSetting('camId', null);
+  const first = skipIds.length ? null : saved;
+  let cam = await openCamera(first).catch((err) => { if (first) return openCamera(null); throw err; });
+  if (!skipIds.includes(cam.deviceId) && cam.torchCapable) return cam;
+
+  const others = (await rearCameras()).filter((d) => d.id !== cam.deviceId && !skipIds.includes(d.id));
+  const candidates = [];
+  if (!skipIds.includes(cam.deviceId)) candidates.push(cam);
+  release(cam.stream); // מצלמה אחת בכל פעם: כמה מכשירים אינם מאפשרים שתיים במקביל
+  let best = null;
+  for (const d of others) {
+    try {
+      const c = await openCamera(d.id);
+      if (c.torchCapable) return c;
+      candidates.push({ ...c, stream: null, release: () => {} });
+      release(c.stream);
+    } catch { /* מצלמה לא זמינה */ }
+  }
+  // אין מצלמה עם פנס: חוזרים לראשונה שאפשר
+  best = candidates[0];
+  return openCamera(best ? best.deviceId : null);
+}
+
+let skipCameraIds = [];
+
 export function runCameraPulse(root) {
   return new Promise((resolve) => {
     let stream = null, video = null, stopLoop = null, ui = null, finished = false;
     let tickOn = false;
+    let currentCamId = '', currentCamLabel = '', torchState = false;
     const unAbort = onAbort(() => finish({ status: 'cancel' }));
 
     function cleanup() {
@@ -40,6 +91,7 @@ export function runCameraPulse(root) {
     function finish(r) {
       if (finished) return;
       finished = true;
+      if (r.status === 'done') skipCameraIds = [];
       cleanup();
       unAbort();
       resolve(r);
@@ -72,27 +124,31 @@ export function runCameraPulse(root) {
 
     async function begin() {
       root.innerHTML = '<section class="panel"><p role="status">מבקש גישה למצלמה…</p></section>';
+      let camInfo;
       try {
-        stream = await acquire({
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 30 } },
-          audio: false,
-        });
+        camInfo = await openBestCamera(skipCameraIds);
       } catch (err) {
         showPrepare(describeError(err, 'camera'));
         return;
       }
+      stream = camInfo.stream;
       if (finished) { release(stream); return; }
+      currentCamId = camInfo.deviceId;
+      currentCamLabel = camInfo.label;
 
-      // פנס — רק אם הדפדפן תומך
+      // פנס — אין הרשאה נפרדת: הוא חלק מהרשאת המצלמה, אך זמין רק במצלמה ובדפדפן שתומכים בכך
       let torch = false;
-      try {
-        const track = stream.getVideoTracks()[0];
-        const caps = track.getCapabilities ? track.getCapabilities() : {};
-        if (caps.torch) {
-          await track.applyConstraints({ advanced: [{ torch: true }] });
-          torch = true;
-        }
-      } catch { torch = false; }
+      const tryTorch = async () => {
+        try {
+          if (camInfo.torchCapable) {
+            await camInfo.track.applyConstraints({ advanced: [{ torch: true }] });
+            torch = true;
+          }
+        } catch { torch = false; }
+        torchState = torch;
+      };
+      await tryTorch();
+      if (torch) { try { store.setSetting('camId', camInfo.deviceId); } catch { /* ignore */ } }
 
       video = document.createElement('video');
       video.setAttribute('playsinline', '');
@@ -101,6 +157,7 @@ export function runCameraPulse(root) {
       document.body.appendChild(video);
       video.srcObject = stream;
       try { await video.play(); } catch { /* ייתכן שיתחיל בכל מקרה */ }
+      if (!torch && camInfo.torchCapable) { await tryTorch(); }
 
       root.innerHTML = `
         <section class="panel" aria-labelledby="cam-run-h">
@@ -109,7 +166,7 @@ export function runCameraPulse(root) {
           <p class="big-num" aria-live="off"><span id="cam-left">${fmtClock((SETTLE_MS + MEASURE_MS) / 1000)}</span></p>
           <p id="cam-cover" class="cover-state" role="status"></p>
           <canvas id="cam-trace" class="trace" aria-label="אות פעימה חי" role="img"></canvas>
-          <p class="hint" id="cam-info">${torch ? 'הפנס הופעל על ידי הדפדפן.' : 'הדפדפן אינו מאפשר שליטה בפנס במכשיר זה — מדדו באור חזק עם אצבע שמכסה את העדשה.'} הנקודות מסמנות פעימות שזוהו בפועל.</p>
+          <p class="hint" id="cam-info">${torch ? 'הפנס הופעל על ידי הדפדפן.' : 'לא נמצאה מצלמה שהדפדפן יכול להדליק לה פנס — מדדו באור חזק עם אצבע שמכסה את העדשה.'} מצלמה: ${esc(camInfo.label || 'לא ידוע')}. הנקודות מסמנות פעימות שזוהו בפועל.</p>
           <label class="check"><input type="checkbox" id="cam-tick" ${audioSupported() ? '' : 'disabled'}> השמעת טיק בכל פעימה שזוהתה (ברירת מחדל: כבוי)</label>
           <div class="btn-row"><button class="btn secondary" id="cam-stop">עצירה וחזרה</button></div>
           <div class="sr-only" id="cam-sr" aria-live="polite"></div>
@@ -239,6 +296,8 @@ export function runCameraPulse(root) {
         ['פריימים בשנייה', (a.fps || 0).toFixed(1)],
         ['כיסוי העדשה', `${Math.round(coverage * 100)}%`],
         ['ערוץ אדום ממוצע', meanRed.toFixed(0)],
+        ['מצלמה', currentCamLabel || '—'],
+        ['פנס', torchState ? 'נדלק' : 'לא נדלק'],
         ['ערוץ שנבחר', a.channel || '—'],
         ['ספקטרום: קצב / יחס אות לרעש / עקביות', `${a.specBpm ?? '—'} / ${(a.specSnr || 0).toFixed(2)} / ${Math.round((a.specConsistency || 0) * 100)}%`],
         ['מקטעי הפרעה (תנועה)', `${Math.round((a.artifactFraction || 0) * 100)}%`],
@@ -266,10 +325,15 @@ export function runCameraPulse(root) {
             ${diagHtml(a, coverage, satFrac, raw)}
             <div class="btn-row">
               <button class="btn primary" id="cam-again">מדידה חוזרת</button>
+              <button class="btn secondary" id="cam-next">נסו מצלמה אחרת</button>
               <button class="btn secondary" id="cam-manual">ספירה ידנית</button>
               <button class="btn ghost" id="cam-skip">דילוג</button>
             </div>
           </section>`;
+        root.querySelector('#cam-next').addEventListener('click', () => {
+          if (currentCamId) skipCameraIds.push(currentCamId);
+          showPrepare('בהפעלה הבאה תיבחר מצלמה אחורית אחרת.');
+        });
         root.querySelector('#cam-diag').addEventListener('click', () => {
           downloadFile(`ppg-diagnostic-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`, JSON.stringify({
             kind: 'ppg-diagnostic', analysis: { ...a, beatTimesMs: undefined },
