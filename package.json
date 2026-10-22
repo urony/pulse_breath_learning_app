@@ -1,0 +1,11 @@
+{
+  "name": "pulse-breath-lab",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "מעבדת הדופק והנשימה — אתר סטטי ללימוד (פותח על ידי אורי העליון)",
+  "scripts": {
+    "test": "node tests/dsp.test.mjs && node tests/storage.test.mjs",
+    "serve": "node tests/serve.mjs"
+  }
+}

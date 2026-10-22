@@ -1,0 +1,29 @@
+/* סגנונות גרפים וטבלאות (משותף לאפליקציה ולדוח) */
+.chart { margin: 0 0 14px; background: #fff; border: 1px solid #cfdcdb; border-radius: 12px; padding: 8px 8px 6px; break-inside: avoid; }
+.chart svg { width: 100%; height: auto; display: block; font-family: "Segoe UI", "Noto Sans Hebrew", Arial, sans-serif; }
+.chart-title { font-weight: 700; font-size: .98rem; margin: 2px 4px 4px; }
+.chart .grid { stroke: #dbe5e4; stroke-width: 1; }
+.chart .axis { stroke: #5b6c71; stroke-width: 1.5; }
+.chart .tick { font-size: 11px; fill: #3f5359; }
+.chart .bar-val { font-weight: 700; fill: #14262c; }
+.chart .axis-label { font-size: 12px; font-weight: 700; fill: #33474d; }
+.chart .tl-bg { fill: #f6faf9; stroke: #cfdcdb; }
+.chart .tl-empty { font-size: 13px; fill: #5b6c71; }
+.chart .playhead { stroke: #14262c; stroke-width: 2; }
+.chart-grid { display: grid; gap: 12px; grid-template-columns: 1fr; }
+@media (min-width: 640px) { .chart-grid { grid-template-columns: 1fr 1fr; } }
+.legend { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 0 4px; margin: 4px 0 0; font-size: .85rem; color: #33474d; }
+.legend li { display: flex; align-items: center; gap: 6px; }
+.chart .legend svg { width: auto; height: auto; flex: none; }
+.empty-chart { text-align: center; padding: 18px 10px; border: 2px dashed #cfdcdb; border-radius: 12px; color: #4a5d63; margin-bottom: 14px; background: #fff; }
+
+.table-wrap { overflow-x: auto; margin: 10px 0; }
+table.data { width: 100%; border-collapse: collapse; font-size: .92rem; background: #fff; }
+table.data caption { text-align: start; font-weight: 700; padding: 6px 2px; color: #33474d; }
+table.data th, table.data td { border: 1px solid #cfdcdb; padding: 5px 6px; text-align: start; vertical-align: top; }
+table.data thead th { background: #e6f1ef; }
+table.data tbody th { font-weight: 600; background: #f8fbfa; }
+small { color: #4a5d63; }
+.badge { display: inline-block; font-size: .72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-inline-start: 6px; white-space: nowrap; }
+.badge.sim { background: #ede7f9; color: #3c2a74; border: 1px dashed #7e57c2; }
+.badge.real { background: #e4f4e6; color: #1b5e20; border: 1px solid #66bb6a; }
