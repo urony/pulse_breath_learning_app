@@ -48,7 +48,8 @@ async function rearCameras() {
 
 // פותח מצלמה: השמורה/ברירת המחדל; אם אין בה שליטה בפנס — מנסה מצלמות אחוריות אחרות ובוחר את הראשונה עם פנס.
 // skipIds: מצלמות שהמשתמש ביקש לדלג עליהן ("נסו מצלמה אחרת").
-async function openBestCamera(skipIds) {
+async function openBestCamera(skipIds, useTorch = true) {
+  if (!useTorch) return openCamera(skipIds.length ? null : store.getSetting('camId', null)).catch(() => openCamera(null));
   const saved = store.getSetting('camId', null);
   const first = skipIds.length ? null : saved;
   let cam = await openCamera(first).catch((err) => { if (first) return openCamera(null); throw err; });
@@ -79,6 +80,7 @@ export function runCameraPulse(root) {
     let stream = null, video = null, stopLoop = null, ui = null, finished = false;
     let tickOn = false;
     let currentCamId = '', currentCamLabel = '', torchState = false;
+    let wantTorch = store.getSetting('useTorch', true) !== false;
     const unAbort = onAbort(() => finish({ status: 'cancel' }));
 
     function cleanup() {
@@ -111,12 +113,14 @@ export function runCameraPulse(root) {
           </ol>
           <p class="hint">הניתוח מתבצע במכשיר שלך בלבד. התמונה לא נשמרת ולא נשלחת, והמצלמה נכבית בסיום. אם הפנס מתחמם — עצרו.</p>
           ${sup.ok ? '' : `<p class="notice warn">${esc(sup.why)}</p>`}
+          <label class="check"><input type="checkbox" id="cam-torch" ${wantTorch ? 'checked' : ''}> הדלקת הפנס (אם נתמך). אם המדידה נכשלת, נסו בלי פנס, באור חזק (חלון/מנורה) שמאיר את האצבע.</label>
           <div class="btn-row">
             <button class="btn primary big" id="cam-start" ${sup.ok ? '' : 'disabled'}>הפעלת מצלמה והתחלת מדידה</button>
             <button class="btn secondary" id="cam-manual">ספירה ידנית במקום</button>
             <button class="btn ghost" id="cam-skip">דילוג על הדופק</button>
           </div>
         </section>`;
+      root.querySelector('#cam-torch').addEventListener('change', (e) => { wantTorch = e.target.checked; try { store.setSetting('useTorch', wantTorch); } catch { /* ignore */ } });
       root.querySelector('#cam-start').addEventListener('click', begin);
       root.querySelector('#cam-manual').addEventListener('click', () => finish({ status: 'manual' }));
       root.querySelector('#cam-skip').addEventListener('click', () => finish({ status: 'skip' }));
@@ -126,7 +130,7 @@ export function runCameraPulse(root) {
       root.innerHTML = '<section class="panel"><p role="status">מבקש גישה למצלמה…</p></section>';
       let camInfo;
       try {
-        camInfo = await openBestCamera(skipCameraIds);
+        camInfo = await openBestCamera(skipCameraIds, wantTorch);
       } catch (err) {
         showPrepare(describeError(err, 'camera'));
         return;
@@ -140,7 +144,7 @@ export function runCameraPulse(root) {
       let torch = false;
       const tryTorch = async () => {
         try {
-          if (camInfo.torchCapable) {
+          if (wantTorch && camInfo.torchCapable) {
             await camInfo.track.applyConstraints({ advanced: [{ torch: true }] });
             torch = true;
           }
@@ -157,7 +161,7 @@ export function runCameraPulse(root) {
       document.body.appendChild(video);
       video.srcObject = stream;
       try { await video.play(); } catch { /* ייתכן שיתחיל בכל מקרה */ }
-      if (!torch && camInfo.torchCapable) { await tryTorch(); }
+      if (!torch && wantTorch && camInfo.torchCapable) { await tryTorch(); }
 
       root.innerHTML = `
         <section class="panel" aria-labelledby="cam-run-h">
@@ -166,7 +170,7 @@ export function runCameraPulse(root) {
           <p class="big-num" aria-live="off"><span id="cam-left">${fmtClock((SETTLE_MS + MEASURE_MS) / 1000)}</span></p>
           <p id="cam-cover" class="cover-state" role="status"></p>
           <canvas id="cam-trace" class="trace" aria-label="אות פעימה חי" role="img"></canvas>
-          <p class="hint" id="cam-info">${torch ? 'הפנס הופעל על ידי הדפדפן.' : 'לא נמצאה מצלמה שהדפדפן יכול להדליק לה פנס — מדדו באור חזק עם אצבע שמכסה את העדשה.'} מצלמה: ${esc(camInfo.label || 'לא ידוע')}. הנקודות מסמנות פעימות שזוהו בפועל.</p>
+          <p class="hint" id="cam-info">${torch ? 'הפנס הופעל על ידי הדפדפן.' : !wantTorch ? 'הפנס כבוי לפי בחירתכם — ודאו אור חזק על האצבע.' : 'לא נמצאה מצלמה שהדפדפן יכול להדליק לה פנס — מדדו באור חזק עם אצבע שמכסה את העדשה.'} מצלמה: ${esc(camInfo.label || 'לא ידוע')}. הנקודות מסמנות פעימות שזוהו בפועל.</p>
           <label class="check"><input type="checkbox" id="cam-tick" ${audioSupported() ? '' : 'disabled'}> השמעת טיק בכל פעימה שזוהתה (ברירת מחדל: כבוי)</label>
           <div class="btn-row"><button class="btn secondary" id="cam-stop">עצירה וחזרה</button></div>
           <div class="sr-only" id="cam-sr" aria-live="polite"></div>
