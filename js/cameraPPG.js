@@ -14,7 +14,7 @@ export const SETTLE_MS = 4000;
 export const MEASURE_MS = 30000;
 
 const FAIL_TEXT = {
-  not_covered: 'האצבע לא כיסתה את העדשה לאורך כל המדידה.',
+  not_covered: 'האצבע לא כיסתה את העדשה לאורך כל המדידה. בטלפון עם כמה מצלמות ייתכן שהאפליקציה משתמשת בעדשה אחרת ממה שכיסיתם: הזיזו את האצבע לעדשה אחרת, או לחצו "נסו מצלמה אחרת".',
   low_fps: 'המצלמה סיפקה מעט מדי פריימים בשנייה (לרוב בגלל תאורה חלשה). נסו אור חזק יותר או פנס.',
   too_short: 'המדידה הסתיימה מוקדם מדי.',
   flat_signal: 'לא התקבל אות פעימה (האות שטוח). בדקו שהאצבע מכסה את העדשה וללא לחץ חזק.',
@@ -252,7 +252,7 @@ export function runCameraPulse(root) {
         root.querySelector('#cam-left').textContent = fmtClock((SETTLE_MS + MEASURE_MS - elapsed) / 1000);
         root.querySelector('#cam-phase').textContent = elapsed < SETTLE_MS ? 'מתייצב' : 'מודד';
         const cv = root.querySelector('#cam-cover');
-        cv.textContent = lastCover ? '✔ האצבע מכסה את העדשה' : '✖ האצבע אינה מכסה את העדשה — כסו אותה בעדינות';
+        cv.textContent = lastCover ? '✔ האצבע מכסה את העדשה' : '✖ האצבע אינה מכסה את העדשה — כסו אותה בעדינות, או נסו להניח אותה על עדשה אחרת של הטלפון';
         cv.className = 'cover-state ' + (lastCover ? 'ok' : 'bad');
         const lb = liveBeats(ts, reds, 8000);
         const canvas = root.querySelector('#cam-trace');
