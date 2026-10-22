@@ -19,7 +19,8 @@ const FAIL_TEXT = {
   flat_signal: 'לא התקבל אות פעימה (האות שטוח). בדקו שהאצבע מכסה את העדשה וללא לחץ חזק.',
   few_beats: 'זוהו מעט מדי פעימות.',
   unstable: 'האות לא היה יציב מספיק לזיהוי פעימות.',
-  low_quality: 'איכות האות לא הספיקה לתוצאה אמינה (ייתכן תנועה או חשיפה לא יציבה).',
+  low_quality: 'האות לא היה מחזורי ועקבי מספיק לתוצאה אמינה (ייתכן תנועה, חשיפה לא יציבה או קצב לא סדיר).',
+  motion: 'זוהתה תנועה חזקה במהלך המדידה. נסו להישאר ללא תנועה, עם היד נתמכת על השולחן.',
   out_of_range: 'הערך שחושב מחוץ לטווח הסביר — לא נשמר.',
 };
 
@@ -114,7 +115,7 @@ export function runCameraPulse(root) {
           <div class="sr-only" id="cam-sr" aria-live="polite"></div>
         </section>`;
 
-      const ts = [], reds = [];
+      const ts = [], reds = [], greens = [], blues = [];
       let covered = 0, total = 0, saturated = 0;
       let wallStart = 0, t0 = null;
       let lastCover = true, lastTickTime = -1;
@@ -148,6 +149,8 @@ export function runCameraPulse(root) {
           lastCover = isCovered;
           ts.push(elapsed);
           reds.push(r);
+          greens.push(g);
+          blues.push(b);
           if (elapsed >= SETTLE_MS) {
             total++;
             if (isCovered) covered++;
@@ -209,14 +212,20 @@ export function runCameraPulse(root) {
 
       function finalize() {
         if (ui) { clearInterval(ui); ui = null; }
-        const analysis = analyzePPG(ts, reds, { settleMs: SETTLE_MS });
+        // ניתוח כל ערוץ צבע ובחירת הטוב ביותר (בכמה מכשירים הערוץ האדום רווי והירוק מכיל את הפעימה)
+        const cands = [['red', reds], ['green', greens], ['blue', blues]].map(([name, sig]) => ({ name, a: analyzePPG(ts, sig, { settleMs: SETTLE_MS }) }));
+        const rank = (c) => (c.a.ok ? (c.a.quality === 'good' ? 3 : 2) : 0) + Math.min(0.99, c.a.specSnr || 0);
+        cands.sort((x, y) => rank(y) - rank(x));
+        const analysis = cands[0].a;
+        analysis.channel = cands[0].name;
+        analysis.channels = Object.fromEntries(cands.map((c) => [c.name, { ok: c.a.ok, quality: c.a.quality, bpm: c.a.bpm, snr: Math.round((c.a.specSnr || 0) * 100) / 100, consistency: c.a.specConsistency, reason: c.a.reason }]));
         const coverage = total ? covered / total : 0;
         // שחרור המצלמה מיד בתום הדגימה
         if (video) { try { video.pause(); } catch { /* ignore */ } video.srcObject = null; video.remove(); }
         release(stream); stream = null;
         if (finished) return;
         if (coverage < 0.8) { analysis.ok = false; analysis.reason = 'not_covered'; }
-        showResult(analysis, coverage, saturated / Math.max(1, total), wallStart + SETTLE_MS, { ts: ts.slice(), reds: reds.slice() });
+        showResult(analysis, coverage, saturated / Math.max(1, total), wallStart + SETTLE_MS, { ts: ts.slice(), reds: reds.slice(), greens: greens.slice(), blues: blues.slice() });
       }
     }
 
@@ -230,6 +239,9 @@ export function runCameraPulse(root) {
         ['פריימים בשנייה', (a.fps || 0).toFixed(1)],
         ['כיסוי העדשה', `${Math.round(coverage * 100)}%`],
         ['ערוץ אדום ממוצע', meanRed.toFixed(0)],
+        ['ערוץ שנבחר', a.channel || '—'],
+        ['ספקטרום: קצב / יחס אות לרעש / עקביות', `${a.specBpm ?? '—'} / ${(a.specSnr || 0).toFixed(2)} / ${Math.round((a.specConsistency || 0) * 100)}%`],
+        ['מקטעי הפרעה (תנועה)', `${Math.round((a.artifactFraction || 0) * 100)}%`],
         ['פריימים בהירים מדי', `${Math.round(satFrac * 100)}%`],
       ];
       return `<details class="diag" open><summary>פרטים טכניים (לדיוק האלגוריתם)</summary>
@@ -263,6 +275,7 @@ export function runCameraPulse(root) {
             kind: 'ppg-diagnostic', analysis: { ...a, beatTimesMs: undefined },
             coverage, satFrac,
             ts: raw.ts.map((x) => Math.round(x)), red: raw.reds.map((x) => Math.round(x * 100) / 100),
+            green: raw.greens.map((x) => Math.round(x * 100) / 100), blue: raw.blues.map((x) => Math.round(x * 100) / 100),
           }), 'application/json');
         });
         root.querySelector('#cam-again').addEventListener('click', () => showPrepare());

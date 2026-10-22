@@ -10,12 +10,13 @@ function check(name, cond, extra = '') {
 function rng(seed) { let s = seed >>> 0; return () => ((s = (s * 1664525 + 1013904223) >>> 0) / 4294967296); }
 function gauss(r) { return Math.sqrt(-2 * Math.log(r() + 1e-12)) * Math.cos(2 * Math.PI * r()); }
 
-function synthPPG({ bpm = 72, seconds = 36, fps = 30, noise = 0.35, amp = 1.5, hrv = 0.03, drift = 4, seed = 1, motion = 0, none = false }) {
+function synthPPG({ steps = 0, bpm = 72, seconds = 36, fps = 30, noise = 0.35, amp = 1.5, hrv = 0.03, drift = 4, seed = 1, motion = 0, none = false }) {
   const r = rng(seed);
   const beats = [];
   let tb = 0.3;
   while (tb < seconds + 2) { beats.push(tb); tb += (60 / bpm) * (1 + hrv * gauss(r)); }
   const t = [], v = [];
+  let stepOff = 0;
   for (let ms = 0, i = 0; ms < seconds * 1000; i++) {
     const time = ms / 1000;
     let p = 0;
@@ -25,7 +26,8 @@ function synthPPG({ bpm = 72, seconds = 36, fps = 30, noise = 0.35, amp = 1.5, h
     }
     const slow = drift * Math.sin(2 * Math.PI * 0.05 * time) + drift * 0.5 * Math.sin(2 * Math.PI * 0.013 * time + 1);
     const mot = motion * Math.sin(2 * Math.PI * 1.7 * time) * (Math.sin(2 * Math.PI * 0.2 * time) > 0.5 ? 1 : 0);
-    v.push(200 - (none ? 0 : amp * p) + slow + mot + noise * gauss(r));
+    if (steps && r() < steps) stepOff += (r() < 0.5 ? -1 : 1) * (3 + 6 * r());
+    v.push(200 - (none ? 0 : amp * p) + slow + mot + stepOff + noise * gauss(r));
     t.push(ms);
     ms += 1000 / fps + (r() - 0.5) * 6; // ג'יטר
   }
@@ -58,14 +60,24 @@ for (const bpm of [48, 60, 72, 95, 130, 160]) {
   check('תנועה: דיוק או דחייה', !r.ok || Math.abs(r.bpm - 75) <= 4, `-> ${r.ok} ${r.bpm} ${r.quality} ${r.reason}`);
 }
 {
-  const s = synthPPG({ bpm: 70, fps: 10, seed: 3 });
+  const s = synthPPG({ bpm: 70, fps: 6, seed: 3 });
   const r = analyzePPG(s.t, s.v, { settleMs: 4000 });
-  check('קצב פריימים נמוך נדחה', !r.ok && r.reason === 'low_fps', `-> ${r.reason}`);
+  check('קצב פריימים נמוך מאוד נדחה', !r.ok && r.reason === 'low_fps', `-> ${r.reason}`);
+  const s2 = synthPPG({ bpm: 70, fps: 10, seed: 4 });
+  const r2 = analyzePPG(s2.t, s2.v, { settleMs: 4000 });
+  check('10 פריימים בשנייה: דיוק או דחייה', !r2.ok || Math.abs(r2.bpm - 70) <= 3, `-> ${r2.bpm} ${r2.reason}`);
 }
 {
   const s = synthPPG({ bpm: 70, seconds: 6, seed: 3 });
   const r = analyzePPG(s.t, s.v, { settleMs: 0 });
   check('מדידה קצרה מדי נדחית', !r.ok);
+}
+
+{
+  // דמוי טלפון אמיתי: 14fps, משרעת פעימה קטנה (0.35) על רקע בהיר, מדרגות חשיפה אקראיות, דופק איטי
+  const s = synthPPG({ bpm: 53, fps: 14, amp: 0.35, noise: 0.1, drift: 1.5, steps: 0.015, seconds: 34, seed: 31 });
+  const r = analyzePPG(s.t, s.v, { settleMs: 4000 });
+  check('PPG חלש עם מדרגות ב-14fps (53 BPM)', r.ok && Math.abs(r.bpm - 53) <= 3, `-> ${r.bpm} (${r.quality}, snr=${(r.specSnr || 0).toFixed(2)}, ${r.reason})`);
 }
 
 // ---------- נשימה ----------
